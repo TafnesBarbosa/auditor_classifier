@@ -33,17 +33,15 @@ def compute_laplacian(images_paths):
     laplacians = np.array(laplacians)
     return laplacians
 
+def select_windows(frames_number, total_number_frames):
+    space = np.linspace(0, total_number_frames, frames_number+1, dtype=int)
+    return space[0:frames_number], space[1:]
+
 def apaga_frames_com_mais_blur(frames_path, frames_number, laplacians):
-    divide = len(laplacians) // frames_number
-    for i in range(len(laplacians) // divide):
-        idx = laplacians[i * divide:(i + 1) * divide].argmax() + i * divide
-        for j in range(i * divide, (i + 1) * divide):
-            if j != idx:
-                os.system('rm ' + frames_path + '/frame{:05d}.png'.format(j+1))
-        print_progress_bar(i, len(laplacians) // divide)
-    if divide * (len(laplacians) // divide) < len(laplacians):
-        idx = laplacians[(len(laplacians) // divide) * divide:].argmax() + (i+1) * divide
-        for j in range((len(laplacians) // divide) * divide,len(laplacians)):
+    begs, ends = select_windows(frames_number, len(laplacians))
+    for beg, end in zip(begs, ends):
+        idx = laplacians[beg:end].argmax() + beg
+        for j in range(beg, end):
             if j != idx:
                 os.system('rm ' + frames_path + '/frame{:05d}.png'.format(j+1))
 
@@ -290,6 +288,7 @@ def preprocess_data(frames_parent_path, colmap_output_path, colmap_limit, info_p
         info["tempo_colmap"] = tempo
         info["colmap_tries"] = number_iterations
         info["camera_model"] = camera_model
+        info["colmap_wrong"] = is_wrong_flag
     else:
         gpu_vram = info["gpu_colmap_vram"]
         gpu_perc = info["gpu_colmap_perc"]
@@ -297,10 +296,11 @@ def preprocess_data(frames_parent_path, colmap_output_path, colmap_limit, info_p
         tempo = info["tempo_colmap"]
         number_iterations = info["colmap_tries"]
         camera_model = info["camera_model"]
+        is_wrong_flag = info["colmap_wrong"]
     write_info(info_path, info)
-    return tempo, gpu_vram, gpu_perc, ram, number_iterations, camera_model
+    return tempo, gpu_vram, gpu_perc, ram, number_iterations, camera_model, is_wrong_flag
 
-def nerfstudio_model(colmap_output_path, splatfacto_output_path, info_path, model, downscale=1):
+def nerfstudio_model(colmap_output_path, splatfacto_output_path, info_path, model, propert=None):
     info = read_info(info_path)
     if not info[model]["trained"]:
         start = time()
@@ -331,12 +331,14 @@ def nerfstudio_model(colmap_output_path, splatfacto_output_path, info_path, mode
             cmd = [
                 "ns-train", model, 
                 "--data", colmap_output_path, 
-                "--max-num-iterations", "100000", 
+                "--max-num-iterations", str(propert.max_num_iterations), 
+                # "--max-num-iterations", "100000", 
                 "--viewer.quit-on-train-completion", "True",
                 "--steps-per-save", "10000", 
                 "--save-only-latest-checkpoint", "False",
                 "--output-dir", splatfacto_output_path,
-                "nerfstudio-data", "--downscale-factor", str(downscale)
+                "nerfstudio-data", "--downscale-factor", str(propert.downscale_factor),
+                "--train-split-fraction", str(propert.split_fraction)
             ]
         gpu_vram, gpu_perc, ram = run_command(cmd)
         end = time()
@@ -355,11 +357,13 @@ def nerfstudio_model(colmap_output_path, splatfacto_output_path, info_path, mode
     write_info(info_path, info)
     return tempo, gpu_vram, gpu_perc, ram
 
-def nerfstudio_model_evaluations(model_output_path, video_folder, destino_path, model, info_path):
+def nerfstudio_model_evaluations(model_output_path, video_folder, destino_path, model, info_path, propert=None):
     info = read_info(info_path)
     if not info[model]["evaluations"]:
-        elems = [*range(10000, 100000, 10000)]
-        elems.append(99999)
+        # elems = [*range(10000, 100000, 10000)]
+        elems = [*range(10000, propert.max_num_iterations, 10000)]
+        elems.append(propert.max_num_iterations-1)
+        # elems.append(99999)
         psnr = []
         ssim = []
         lpips = []
@@ -565,12 +569,11 @@ def write_info(info_path, info):
         file.write(json_object)
         file.close()
 
-def pipeline(parent_path, video_folder, video_path, pilot_output_path, colmap_output_path, splatfacto_output_path, models, is_images=False):
+def pipeline(parent_path, video_folder, video_path, pilot_output_path, colmap_output_path, splatfacto_output_path, models, is_images=False, propert=None):
     # repetition_number = 10
-    frames_number = 300
     colmap_limit = 3
-    elems = [*range(10000, 100000, 10000)]
-    elems.append(99999)
+    elems = [*range(10000, propert.max_num_iterations, 10000)]
+    elems.append(propert.max_num_iterations-1)
 
     frames_parent_path = os.path.join(parent_path, video_folder)
     images_path = os.path.join(frames_parent_path, 'images_orig')
@@ -582,16 +585,16 @@ def pipeline(parent_path, video_folder, video_path, pilot_output_path, colmap_ou
     ]
 
     # Init
-    info_path = init(parent_path, video_folder)
+    info_path = init(parent_path, video_folder, is_images)
 
     # Extract frames and get laplacians
-    laplacians = extrai_frames(parent_path, video_folder, video_path, frames_number, info_path)
+    laplacians = extrai_frames(parent_path, video_folder, video_path, propert.frames_number, info_path)
 
     # Pilot study with repetitions
     # pilot_study(repetition_number, frames_parent_path, pilot_output_path, info_path)
 
     # Preprocess dataset
-    tempo_colmap, gpu_colmap_vram, gpu_colmap_perc, ram_colmap, number_iterations_colmap, camera_model = preprocess_data(frames_parent_path, colmap_output_path, colmap_limit, info_path)
+    tempo_colmap, gpu_colmap_vram, gpu_colmap_perc, ram_colmap, number_iterations_colmap, camera_model, is_wrong_flag = preprocess_data(frames_parent_path, colmap_output_path, colmap_limit, info_path)
     
     # Colmap evaluations
     normals_inside, normals_inside_center, percentage_angle_views, percentage_angle_views_center, percentage_poses_found, _ = preprocess_evaluation_main(colmap_output_path, images_path_8)
@@ -617,6 +620,7 @@ def pipeline(parent_path, video_folder, video_path, pilot_output_path, colmap_ou
             "percentage_angle_views_center": percentage_angle_views_center, 
             "percentage_poses_found": percentage_poses_found,
             "camera_model": camera_model,
+            "wrong_colmap": is_wrong_flag,
 
             # "percentage_normals_inside_pilot": normals_inside_pilot,
             # "percentage_normals_inside_center_pilot": normals_inside_center_pilot, 
@@ -628,10 +632,10 @@ def pipeline(parent_path, video_folder, video_path, pilot_output_path, colmap_ou
     
     # Models
     for model in models:
-        tempo_train, gpu_train_vram, gpu_train_perc, ram_train = nerfstudio_model(colmap_output_path, splatfacto_output_path + f"_{model}", info_path, model, downscale=1)
+        tempo_train, gpu_train_vram, gpu_train_perc, ram_train = nerfstudio_model(colmap_output_path, splatfacto_output_path + f"_{model}", info_path, model, propert=propert)
     
         # Model evaluations
-        psnr, ssim, lpips, fps = nerfstudio_model_evaluations(splatfacto_output_path + f"_{model}", video_folder, os.path.join(frames_parent_path, 'evaluations'), model, info_path)
+        psnr, ssim, lpips, fps = nerfstudio_model_evaluations(splatfacto_output_path + f"_{model}", video_folder, os.path.join(frames_parent_path, 'evaluations'), model, info_path, propert=propert)
 
         output[model] = {}
         
