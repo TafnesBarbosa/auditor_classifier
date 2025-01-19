@@ -6,6 +6,7 @@ import struct
 import matplotlib.cm as cm
 import random
 import matplotlib.patches as patches
+from matplotlib.patches import FancyArrowPatch
 import json
 import cv2
 from time import time, sleep
@@ -13,6 +14,8 @@ import subprocess
 import pandas as pd
 import io
 import csv
+import math
+import sqlite3
 
 def print_progress_bar(iteration, total, bar_length=50):
     progress = (iteration / total)
@@ -325,7 +328,7 @@ def nerfstudio_model(colmap_output_path, splatfacto_output_path, info_path, mode
                 "--pipeline.model.sh-degree-interval", "2000",
                 "--pipeline.model.use-avg-appearance", "False",
                 "--pipeline.model.eval-right-half", "True",
-                "nerfstudio-data", "--downscale-factor", str(downscale)
+                "nerfstudio-data", "--downscale-factor", str(propert.downscale_factor)
             ]
         else:
             cmd = [
@@ -357,13 +360,11 @@ def nerfstudio_model(colmap_output_path, splatfacto_output_path, info_path, mode
     write_info(info_path, info)
     return tempo, gpu_vram, gpu_perc, ram
 
-def nerfstudio_model_evaluations(model_output_path, video_folder, destino_path, model, info_path, propert=None):
+def nerfstudio_model_evaluations(model_output_path, video_folder, destino_path, model, info_path, project_path, propert=None):
     info = read_info(info_path)
+    elems = [*range(10000, propert.max_num_iterations, 10000)]
+    elems.append(propert.max_num_iterations-1)
     if not info[model]["evaluations"]:
-        # elems = [*range(10000, 100000, 10000)]
-        elems = [*range(10000, propert.max_num_iterations, 10000)]
-        elems.append(propert.max_num_iterations-1)
-        # elems.append(99999)
         psnr = []
         ssim = []
         lpips = []
@@ -393,8 +394,109 @@ def nerfstudio_model_evaluations(model_output_path, video_folder, destino_path, 
         ssim = info[model]["ssim"]
         lpips = info[model]["lpips"]
         fps = info[model]["fps"]
+    elem_best = elems[lpips.index(min(lpips))]
+    eval_path = os.path.join(destino_path, f'eval_ckpt_{elem_best:09}.json')
+    get_eval_images(project_path, propert.split_fraction, eval_path, model)
     write_info(info_path, info)
     return psnr, ssim, lpips, fps
+
+def get_eval_images(project_path, train_split_fraction, eval_path, ns_model):
+    db_path = os.path.join(project_path, 'colmap', 'database.db')
+    conn = sqlite3.connect(db_path)
+    cursor = conn.cursor()
+    
+    # Count descriptors
+    cursor.execute("SELECT image_id, rows AS num_descriptors FROM keypoints;")
+    descriptors = cursor.fetchall()
+    
+    conn.close()
+
+    imagesd = []
+    for image, row in descriptors:
+        imagesd.append(image)
+    imagesd = np.array(imagesd)
+
+    idxs = models_images(os.path.join(project_path, 'colmap', 'sparse'), os.path.join(project_path, 'images_8'))
+    print(len(idxs))
+    num_images = len(idxs)
+    num_train_images = math.ceil(num_images * train_split_fraction)
+    num_eval_images = num_images - num_train_images
+    i_all = np.arange(num_images)
+    i_train = np.linspace(
+        0, num_images - 1, num_train_images, dtype=int
+    )  # equally spaced training images starting and ending at 0 and num_images-1
+    i_eval = np.setdiff1d(i_all, i_train)  # eval images are the remaining images
+    assert len(i_eval) == num_eval_images
+    i_eval = idxs[i_eval]
+
+    metrics_list = get_metrics_list(eval_path)
+    psnr = np.array([elem['psnr'] for elem in metrics_list])
+    ssim = np.array([elem['ssim'] for elem in metrics_list])
+    lpips = np.array([elem['lpips'] for elem in metrics_list])
+
+    folder_report = f'report/{ns_model}'
+    os.system(f'mkdir {os.path.join(project_path, folder_report)}')
+    
+    PSNR_limit = 25
+    fig, ax = plt.subplots(figsize=(12,10))
+    plt.plot(imagesd[i_eval], psnr, 'b', linewidth=0.5)
+    plt.plot(imagesd[i_eval], psnr, '.b', markersize=3)
+    plt.plot([imagesd[i_eval[0]]-imagesd[i_eval[-1]]*0.05, imagesd[i_eval[-1]]+imagesd[i_eval[-1]]*0.05], [PSNR_limit, PSNR_limit], '--k', linewidth=2)
+    arrow = FancyArrowPatch((imagesd[i_eval[0]]-imagesd[i_eval[-1]]*0.05, PSNR_limit), (imagesd[i_eval[0]]-imagesd[i_eval[-1]]*0.05, PSNR_limit+0.1*(ax.get_ylim()[1]-ax.get_ylim()[0])), arrowstyle='-|>', mutation_scale=15, color='black')
+    ax.add_patch(arrow)
+    arrow = FancyArrowPatch((imagesd[i_eval[-1]]+imagesd[i_eval[-1]]*0.05, PSNR_limit), (imagesd[i_eval[-1]]+imagesd[i_eval[-1]]*0.05, PSNR_limit+0.1*(ax.get_ylim()[1]-ax.get_ylim()[0])), arrowstyle='-|>', mutation_scale=15, color='black')
+    ax.add_patch(arrow)
+    plt.grid(True)
+    plt.ylabel('PSNR')
+    plt.xlabel('Images')
+    plt.title('Evaluation PSNR')
+    plt.savefig(os.path.join(project_path, folder_report, 'PSNR_per_image.png'), bbox_inches='tight')
+
+    SSIM_limit = 0.9
+    fig, ax = plt.subplots(figsize=(12,10))
+    plt.plot(imagesd[i_eval], ssim, 'r', linewidth=0.5)
+    plt.plot(imagesd[i_eval], ssim, '.r', markersize=3)
+    plt.plot([imagesd[i_eval[0]]-imagesd[i_eval[-1]]*0.05, imagesd[i_eval[-1]]+imagesd[i_eval[-1]]*0.05], [SSIM_limit, SSIM_limit], '--k', linewidth=2)
+    arrow = FancyArrowPatch((imagesd[i_eval[0]]-imagesd[i_eval[-1]]*0.05, SSIM_limit), (imagesd[i_eval[0]]-imagesd[i_eval[-1]]*0.05, SSIM_limit+0.1*(ax.get_ylim()[1]-ax.get_ylim()[0])), arrowstyle='-|>', mutation_scale=15, color='black')
+    ax.add_patch(arrow)
+    arrow = FancyArrowPatch((imagesd[i_eval[-1]]+imagesd[i_eval[-1]]*0.05, SSIM_limit), (imagesd[i_eval[-1]]+imagesd[i_eval[-1]]*0.05, SSIM_limit+0.1*(ax.get_ylim()[1]-ax.get_ylim()[0])), arrowstyle='-|>', mutation_scale=15, color='black')
+    ax.add_patch(arrow)
+    plt.grid(True)
+    plt.ylabel('SSIM')
+    plt.xlabel('Images')
+    plt.title('Evaluation SSIM')
+    plt.savefig(os.path.join(project_path, folder_report, 'SSIM_per_image.png'), bbox_inches='tight')
+
+    LPIPS_limit = 0.15
+    fig, ax = plt.subplots(figsize=(12,10))
+    plt.plot(imagesd[i_eval], lpips, 'g', linewidth=0.5)
+    plt.plot(imagesd[i_eval], lpips, '.g', markersize=3)
+    plt.plot([imagesd[i_eval[0]]-imagesd[i_eval[-1]]*0.05, imagesd[i_eval[-1]]+imagesd[i_eval[-1]]*0.05], [LPIPS_limit, LPIPS_limit], '--k', linewidth=2)
+    arrow = FancyArrowPatch((imagesd[i_eval[0]]-imagesd[i_eval[-1]]*0.05, LPIPS_limit), (imagesd[i_eval[0]]-imagesd[i_eval[-1]]*0.05, LPIPS_limit-0.1*(ax.get_ylim()[1]-ax.get_ylim()[0])), arrowstyle='-|>', mutation_scale=15, color='black')
+    ax.add_patch(arrow)
+    arrow = FancyArrowPatch((imagesd[i_eval[-1]]+imagesd[i_eval[-1]]*0.05, LPIPS_limit), (imagesd[i_eval[-1]]+imagesd[i_eval[-1]]*0.05, LPIPS_limit-0.1*(ax.get_ylim()[1]-ax.get_ylim()[0])), arrowstyle='-|>', mutation_scale=15, color='black')
+    ax.add_patch(arrow)
+    plt.grid(True)
+    plt.ylabel('LPIPS')
+    plt.xlabel('Images')
+    plt.title('Evaluation LPIPS')
+    plt.savefig(os.path.join(project_path, folder_report, 'LPIPS_per_image.png'), bbox_inches='tight')
+
+def models_images(path_to_model_file, path_images):
+    image_idss = []
+    models = []
+
+    for folder in sorted(os.listdir(path_to_model_file)):
+        image_idsd = get_images_with_pose_ids(os.path.join(path_to_model_file, folder, 'images.bin'), path_images)
+        image_idss.append(image_idsd)
+        models.append(int(folder))
+    idx = models.index(0)
+    image_idsd = np.array(image_idss[idx])
+    return np.where(image_idsd == 1)[0]
+
+def get_metrics_list(eval_path):
+    info = read_info(eval_path)
+    return info['results_list']
 
 def compute_metrics(camera_positions, normals):
     # Percentage of normals looking to inside
@@ -520,7 +622,156 @@ def preprocess_evaluation_main(colmap_output_path, images_path):
     percentage_angle_views = plot_number_views(thetas, phis, centered=False, plot=False)
     percentage_angle_views_center = plot_number_views(thetas_center, phis_center, centered=True, plot=False)
 
+    plot_matches_metrics(colmap_output_path)
+
     return normals_inside, normals_inside_center, percentage_angle_views, percentage_angle_views_center, num_reg_images_max / num_images, camera_model
+
+def plot_matches_metrics(project_path):
+    folder_report = 'report'
+    os.system(f'mkdir {project_path}/{folder_report}')
+    folder_report = 'report/colmap'
+    os.system(f'mkdir {project_path}/{folder_report}')
+    path_images = os.path.join(project_path, 'images_8')
+    path_to_model_file = os.path.join(project_path, 'colmap', 'sparse')
+
+    # COLMAP DATABASE
+    db_path = os.path.join(project_path, 'colmap', 'database.db')
+    conn = sqlite3.connect(db_path)
+    cursor = conn.cursor()
+    
+    cursor.execute("SELECT image_id, rows AS num_descriptors FROM keypoints;")
+    descriptors = cursor.fetchall()
+    
+    cursor.execute("SELECT pair_id, rows AS num_matches FROM matches;")
+    total_matches = cursor.fetchall()
+
+    cursor.execute("SELECT pair_id, config AS num_geometries FROM two_view_geometries;")
+    geometries = cursor.fetchall()
+
+    cursor.execute("SELECT image_id, name AS names FROM images;")
+    image_names = cursor.fetchall()
+    image_namesd = {}
+    for id, name in image_names:
+        image_namesd[id] = name
+    
+    conn.close()
+
+    imagesd = []
+    num_descriptors = []
+    for image, row in descriptors:
+        imagesd.append(image)
+        num_descriptors.append(row)
+
+    matchesd = np.zeros((len(imagesd),len(imagesd)))
+    for pair, row in total_matches:
+        im1 = pair // 2147483647
+        im2 = pair % 2147483647
+        matchesd[im1-1,im2-1] = row
+        matchesd[im2-1,im1-1] = row
+    
+    matches_configd = np.zeros((len(imagesd),len(imagesd)))
+    for pair, row in geometries:
+        im1 = pair // 2147483647
+        im2 = pair % 2147483647
+        matches_configd[im1-1,im2-1] = row
+        matches_configd[im2-1,im1-1] = row
+
+    # Matches with cameras found
+    colors = ['b', 'r', 'g', 'y', 'c', 'm', 'w']
+    k = 0
+    plt.figure()
+    image_idss = []
+    models = []
+    nones = np.zeros_like(imagesd, dtype=int)
+    for folder in sorted(os.listdir(path_to_model_file)):
+        image_idsd = get_images_with_pose_ids(os.path.join(path_to_model_file, folder, 'images.bin'), path_images)
+        plt.plot(
+            imagesd, 
+            100-np.count_nonzero(matches_configd==0, axis=0)*100/len(imagesd) * image_idsd, 
+            '-', 
+            color=colors[k], 
+            label= 'model ' + folder, 
+            linewidth=2
+        )
+        k += 1
+        aux = image_idsd
+        aux[np.isnan(aux)] = 0
+        nones = nones | aux.astype(int)
+        image_idss.append(image_idsd)
+        models.append('model ' + folder)
+    nones = nones.astype(float)
+    nones[nones==1] = np.nan
+    nones[nones==0] = 1
+    if True in (nones==1):
+        plt.plot(
+            imagesd, 
+            100-np.count_nonzero(matches_configd==0, axis=0)*100/len(imagesd) * nones, 
+            'x', 
+            color='k', 
+            label= 'no model', 
+            linewidth=2
+        )
+    plt.xlabel('Images')
+    plt.ylabel('Percentage')
+    plt.title('Percentage of images matches related with some camera type for the models found')
+    plt.grid(True)
+    plt.legend()
+    plt.savefig(os.path.join(project_path, folder_report, 'percentage_cameras_matches.png'), bbox_inches='tight')
+
+    # Matches between images
+    plt.figure(figsize=(8,8))
+    plt.imshow(matchesd**0.25, cmap='hot')  # 'viridis' is the colormap; you can try 'gray', 'hot', etc.
+    plt.colorbar()  # Add a colorbar to indicate value ranges
+    plt.title(f"Matches between images")
+    plt.xlabel('Images')
+    plt.ylabel('Images')
+    plt.savefig(os.path.join(project_path, folder_report, 'images_matches.png'), bbox_inches='tight')
+
+    # List of images per model
+    lists = []
+    for model, image_idsd in zip(models, image_idss):
+        aux = np.array(imagesd)[image_idsd == 1].astype(int).tolist()
+        aux = [image_namesd[key] for key in aux]
+        lists.append(aux)
+    aux = np.array(imagesd)[nones == 1].astype(int).tolist()
+    aux = [image_namesd[key] for key in aux]
+    lists.append(aux)
+    
+    df = pd.DataFrame(lists).T.fillna(' ')
+    models.append('no model')
+    df.columns = models
+    df.to_csv(os.path.join(project_path, folder_report, 'models_with_images.csv'), index=False, sep='\t')
+
+def get_images_with_pose_ids(path_to_model_file, path_images):
+    """
+    see: src/base/reconstruction.cc
+        void Reconstruction::ReadImagesBinary(const std::string& path)
+        void Reconstruction::WriteImagesBinary(const std::string& path)
+    """
+    num_images = get_num_images(path_images)
+    with open(path_to_model_file, "rb") as fid:
+        num_reg_images = read_next_bytes(fid, 8, "Q")[0]
+        Qs = [None] * num_images
+        Ts = [None] * num_images
+        image_names = []
+        image_ids = np.ones((num_images,)) * np.nan
+        for _ in range(num_reg_images):
+            binary_image_properties = read_next_bytes(fid, num_bytes=64, format_char_sequence="idddddddi")
+            image_id = binary_image_properties[0]
+            image_ids[image_id-1] = 1
+            qvec = np.array(binary_image_properties[1:5])
+            tvec = np.array(binary_image_properties[5:8])
+            camera_id = binary_image_properties[8]
+            image_name = b""
+            current_char = read_next_bytes(fid, 1, "c")[0]
+            while current_char != b"\x00":  # look for the ASCII 0 entry
+                image_name += current_char
+                current_char = read_next_bytes(fid, 1, "c")[0]
+            image_name = image_name.decode("utf-8")
+            image_names.append(image_name)
+            num_points2D = read_next_bytes(fid, num_bytes=8, format_char_sequence="Q")[0]
+            x_y_id_s = read_next_bytes(fid, num_bytes=24 * num_points2D, format_char_sequence="ddq" * num_points2D)
+    return image_ids
 
 def init(parent_path, video_folder, is_images=False):
     if not os.path.exists(os.path.join(parent_path, video_folder, "info.json")):
@@ -635,7 +886,7 @@ def pipeline(parent_path, video_folder, video_path, pilot_output_path, colmap_ou
         tempo_train, gpu_train_vram, gpu_train_perc, ram_train = nerfstudio_model(colmap_output_path, splatfacto_output_path + f"_{model}", info_path, model, propert=propert)
     
         # Model evaluations
-        psnr, ssim, lpips, fps = nerfstudio_model_evaluations(splatfacto_output_path + f"_{model}", video_folder, os.path.join(frames_parent_path, 'evaluations'), model, info_path, propert=propert)
+        psnr, ssim, lpips, fps = nerfstudio_model_evaluations(splatfacto_output_path + f"_{model}", video_folder, os.path.join(frames_parent_path, f'output_{model}', 'evaluations'), model, info_path, colmap_output_path, propert=propert)
 
         output[model] = {}
         
