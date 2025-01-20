@@ -417,7 +417,6 @@ def get_eval_images(project_path, train_split_fraction, eval_path, ns_model):
     imagesd = np.array(imagesd)
 
     idxs = models_images(os.path.join(project_path, 'colmap', 'sparse'), os.path.join(project_path, 'images_8'))
-    print(len(idxs))
     num_images = len(idxs)
     num_train_images = math.ceil(num_images * train_split_fraction)
     num_eval_images = num_images - num_train_images
@@ -430,57 +429,60 @@ def get_eval_images(project_path, train_split_fraction, eval_path, ns_model):
     i_eval = idxs[i_eval]
 
     metrics_list = get_metrics_list(eval_path)
-    psnr = np.array([elem['psnr'] for elem in metrics_list])
-    ssim = np.array([elem['ssim'] for elem in metrics_list])
-    lpips = np.array([elem['lpips'] for elem in metrics_list])
-
     folder_report = f'report/{ns_model}'
     os.system(f'mkdir {os.path.join(project_path, folder_report)}')
-    
-    PSNR_limit = 25
-    fig, ax = plt.subplots(figsize=(12,10))
-    plt.plot(imagesd[i_eval], psnr, 'b', linewidth=0.5)
-    plt.plot(imagesd[i_eval], psnr, '.b', markersize=3)
-    plt.plot([imagesd[i_eval[0]]-imagesd[i_eval[-1]]*0.05, imagesd[i_eval[-1]]+imagesd[i_eval[-1]]*0.05], [PSNR_limit, PSNR_limit], '--k', linewidth=2)
-    arrow = FancyArrowPatch((imagesd[i_eval[0]]-imagesd[i_eval[-1]]*0.05, PSNR_limit), (imagesd[i_eval[0]]-imagesd[i_eval[-1]]*0.05, PSNR_limit+0.1*(ax.get_ylim()[1]-ax.get_ylim()[0])), arrowstyle='-|>', mutation_scale=15, color='black')
-    ax.add_patch(arrow)
-    arrow = FancyArrowPatch((imagesd[i_eval[-1]]+imagesd[i_eval[-1]]*0.05, PSNR_limit), (imagesd[i_eval[-1]]+imagesd[i_eval[-1]]*0.05, PSNR_limit+0.1*(ax.get_ylim()[1]-ax.get_ylim()[0])), arrowstyle='-|>', mutation_scale=15, color='black')
-    ax.add_patch(arrow)
-    plt.grid(True)
-    plt.ylabel('PSNR')
-    plt.xlabel('Images')
-    plt.title('Evaluation PSNR')
-    plt.savefig(os.path.join(project_path, folder_report, 'PSNR_per_image.png'), bbox_inches='tight')
+    if metrics_list is not None:
+        psnr = np.array([elem['psnr'] for elem in metrics_list])
+        ssim = np.array([elem['ssim'] for elem in metrics_list])
+        lpips = np.array([elem['lpips'] for elem in metrics_list])
+        
+        PSNR_limit = 25
+        fig, ax = plt.subplots(figsize=(12,10))
+        plt.plot(imagesd[i_eval], psnr, 'b', linewidth=0.5)
+        plt.plot(imagesd[i_eval], psnr, '.b', markersize=3)
+        plt.plot([imagesd[i_eval[0]]-imagesd[i_eval[-1]]*0.05, imagesd[i_eval[-1]]+imagesd[i_eval[-1]]*0.05], [PSNR_limit, PSNR_limit], '--k', linewidth=2)
+        arrow = FancyArrowPatch((imagesd[i_eval[0]]-imagesd[i_eval[-1]]*0.05, PSNR_limit), (imagesd[i_eval[0]]-imagesd[i_eval[-1]]*0.05, PSNR_limit+0.1*(ax.get_ylim()[1]-ax.get_ylim()[0])), arrowstyle='-|>', mutation_scale=15, color='black')
+        ax.add_patch(arrow)
+        arrow = FancyArrowPatch((imagesd[i_eval[-1]]+imagesd[i_eval[-1]]*0.05, PSNR_limit), (imagesd[i_eval[-1]]+imagesd[i_eval[-1]]*0.05, PSNR_limit+0.1*(ax.get_ylim()[1]-ax.get_ylim()[0])), arrowstyle='-|>', mutation_scale=15, color='black')
+        ax.add_patch(arrow)
+        plt.grid(True)
+        plt.ylabel('PSNR')
+        plt.xlabel('Images')
+        plt.title('Evaluation PSNR')
+        plt.savefig(os.path.join(project_path, folder_report, 'PSNR_per_image.png'), bbox_inches='tight')
 
-    SSIM_limit = 0.9
-    fig, ax = plt.subplots(figsize=(12,10))
-    plt.plot(imagesd[i_eval], ssim, 'r', linewidth=0.5)
-    plt.plot(imagesd[i_eval], ssim, '.r', markersize=3)
-    plt.plot([imagesd[i_eval[0]]-imagesd[i_eval[-1]]*0.05, imagesd[i_eval[-1]]+imagesd[i_eval[-1]]*0.05], [SSIM_limit, SSIM_limit], '--k', linewidth=2)
-    arrow = FancyArrowPatch((imagesd[i_eval[0]]-imagesd[i_eval[-1]]*0.05, SSIM_limit), (imagesd[i_eval[0]]-imagesd[i_eval[-1]]*0.05, SSIM_limit+0.1*(ax.get_ylim()[1]-ax.get_ylim()[0])), arrowstyle='-|>', mutation_scale=15, color='black')
-    ax.add_patch(arrow)
-    arrow = FancyArrowPatch((imagesd[i_eval[-1]]+imagesd[i_eval[-1]]*0.05, SSIM_limit), (imagesd[i_eval[-1]]+imagesd[i_eval[-1]]*0.05, SSIM_limit+0.1*(ax.get_ylim()[1]-ax.get_ylim()[0])), arrowstyle='-|>', mutation_scale=15, color='black')
-    ax.add_patch(arrow)
-    plt.grid(True)
-    plt.ylabel('SSIM')
-    plt.xlabel('Images')
-    plt.title('Evaluation SSIM')
-    plt.savefig(os.path.join(project_path, folder_report, 'SSIM_per_image.png'), bbox_inches='tight')
+        SSIM_limit = 0.9
+        fig, ax = plt.subplots(figsize=(12,10))
+        plt.plot(imagesd[i_eval], ssim, 'r', linewidth=0.5)
+        plt.plot(imagesd[i_eval], ssim, '.r', markersize=3)
+        plt.plot([imagesd[i_eval[0]]-imagesd[i_eval[-1]]*0.05, imagesd[i_eval[-1]]+imagesd[i_eval[-1]]*0.05], [SSIM_limit, SSIM_limit], '--k', linewidth=2)
+        arrow = FancyArrowPatch((imagesd[i_eval[0]]-imagesd[i_eval[-1]]*0.05, SSIM_limit), (imagesd[i_eval[0]]-imagesd[i_eval[-1]]*0.05, SSIM_limit+0.1*(ax.get_ylim()[1]-ax.get_ylim()[0])), arrowstyle='-|>', mutation_scale=15, color='black')
+        ax.add_patch(arrow)
+        arrow = FancyArrowPatch((imagesd[i_eval[-1]]+imagesd[i_eval[-1]]*0.05, SSIM_limit), (imagesd[i_eval[-1]]+imagesd[i_eval[-1]]*0.05, SSIM_limit+0.1*(ax.get_ylim()[1]-ax.get_ylim()[0])), arrowstyle='-|>', mutation_scale=15, color='black')
+        ax.add_patch(arrow)
+        plt.grid(True)
+        plt.ylabel('SSIM')
+        plt.xlabel('Images')
+        plt.title('Evaluation SSIM')
+        plt.savefig(os.path.join(project_path, folder_report, 'SSIM_per_image.png'), bbox_inches='tight')
 
-    LPIPS_limit = 0.15
-    fig, ax = plt.subplots(figsize=(12,10))
-    plt.plot(imagesd[i_eval], lpips, 'g', linewidth=0.5)
-    plt.plot(imagesd[i_eval], lpips, '.g', markersize=3)
-    plt.plot([imagesd[i_eval[0]]-imagesd[i_eval[-1]]*0.05, imagesd[i_eval[-1]]+imagesd[i_eval[-1]]*0.05], [LPIPS_limit, LPIPS_limit], '--k', linewidth=2)
-    arrow = FancyArrowPatch((imagesd[i_eval[0]]-imagesd[i_eval[-1]]*0.05, LPIPS_limit), (imagesd[i_eval[0]]-imagesd[i_eval[-1]]*0.05, LPIPS_limit-0.1*(ax.get_ylim()[1]-ax.get_ylim()[0])), arrowstyle='-|>', mutation_scale=15, color='black')
-    ax.add_patch(arrow)
-    arrow = FancyArrowPatch((imagesd[i_eval[-1]]+imagesd[i_eval[-1]]*0.05, LPIPS_limit), (imagesd[i_eval[-1]]+imagesd[i_eval[-1]]*0.05, LPIPS_limit-0.1*(ax.get_ylim()[1]-ax.get_ylim()[0])), arrowstyle='-|>', mutation_scale=15, color='black')
-    ax.add_patch(arrow)
-    plt.grid(True)
-    plt.ylabel('LPIPS')
-    plt.xlabel('Images')
-    plt.title('Evaluation LPIPS')
-    plt.savefig(os.path.join(project_path, folder_report, 'LPIPS_per_image.png'), bbox_inches='tight')
+        LPIPS_limit = 0.15
+        fig, ax = plt.subplots(figsize=(12,10))
+        plt.plot(imagesd[i_eval], lpips, 'g', linewidth=0.5)
+        plt.plot(imagesd[i_eval], lpips, '.g', markersize=3)
+        plt.plot([imagesd[i_eval[0]]-imagesd[i_eval[-1]]*0.05, imagesd[i_eval[-1]]+imagesd[i_eval[-1]]*0.05], [LPIPS_limit, LPIPS_limit], '--k', linewidth=2)
+        arrow = FancyArrowPatch((imagesd[i_eval[0]]-imagesd[i_eval[-1]]*0.05, LPIPS_limit), (imagesd[i_eval[0]]-imagesd[i_eval[-1]]*0.05, LPIPS_limit-0.1*(ax.get_ylim()[1]-ax.get_ylim()[0])), arrowstyle='-|>', mutation_scale=15, color='black')
+        ax.add_patch(arrow)
+        arrow = FancyArrowPatch((imagesd[i_eval[-1]]+imagesd[i_eval[-1]]*0.05, LPIPS_limit), (imagesd[i_eval[-1]]+imagesd[i_eval[-1]]*0.05, LPIPS_limit-0.1*(ax.get_ylim()[1]-ax.get_ylim()[0])), arrowstyle='-|>', mutation_scale=15, color='black')
+        ax.add_patch(arrow)
+        plt.grid(True)
+        plt.ylabel('LPIPS')
+        plt.xlabel('Images')
+        plt.title('Evaluation LPIPS')
+        plt.savefig(os.path.join(project_path, folder_report, 'LPIPS_per_image.png'), bbox_inches='tight')
+    else:
+        with open(os.path.join(project_path, folder_report, 'ALERT.txt'), 'w') as filetext:
+            filetext.write('Metrics per image not generated, because Nerfstudio code was not changed as shown in the file changes_nerfstudio_metric_per_image.txt')
 
 def models_images(path_to_model_file, path_images):
     image_idss = []
@@ -496,7 +498,10 @@ def models_images(path_to_model_file, path_images):
 
 def get_metrics_list(eval_path):
     info = read_info(eval_path)
-    return info['results_list']
+    if 'results_list' in info.keys():
+        return info['results_list']
+    else:
+        return None
 
 def compute_metrics(camera_positions, normals):
     # Percentage of normals looking to inside
