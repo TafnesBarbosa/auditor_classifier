@@ -59,7 +59,6 @@ def main(path, models, is_images=False, propert=None):
         )
         write_info(os.path.join(path, file, "output_metrics_features.json"), output)
 
-
 parser = argparse.ArgumentParser(description="Script with argparse options")
 # Add arguments
 parser.add_argument("-vd", "--videos_dir", type=str, help="Folder with videos. Do not use ./ to refer to the folder. Use the absolute path.", default=None)
@@ -73,6 +72,8 @@ parser.add_argument("-mi", "--max_num_iterations", type=int, help="Maximum numbe
 parser.add_argument("-cvcw", "--colmap_video_changes_window", type=int, help="Approximate size of window to suggest changes in the video, in case of not finding all poses in one camera model", default=15)
 parser.add_argument("-cvcv", "--colmap_video_changes_velocity", type=float, help="Velocity of suggested frames to be changed. Must be less than one, in order to make a slower part of the video", default=0.5)
 parser.add_argument("-cl", "--colmap_limit", type=int, help="Number of tries for COLMAP to find all the poses", default=3)
+parser.add_argument("-oc", "--only_colmap", type=bool, help="Number of tries for COLMAP to find all the poses", default=False)
+parser.add_argument("-is", "--is_sorted", type=bool, help="Wether the dataset of image is sorted", default=True)
 # Parse arguments
 args = parser.parse_args()
 
@@ -85,15 +86,16 @@ propert.add_property('max_num_iterations', args.max_num_iterations)
 propert.add_property('colmap_video_changes_window', args.colmap_video_changes_window)
 propert.add_property('colmap_video_changes_velocity', args.colmap_video_changes_velocity)
 propert.add_property('colmap_limit', args.colmap_limit)
-
+propert.add_property('only_colmap', args.only_colmap)
+propert.add_property('is_sorted', args.is_sorted)
 
 models = [
     # 'nerfacto',
 #     'nerfacto-big',
-    # 'splatfacto',
+    'splatfacto',
 #     'splatfacto-big',
 #     'splatfacto-w',
-    'splatfacto-w-light'
+    # 'splatfacto-w-light'
 ]
 
 if args.initialize:

@@ -966,6 +966,150 @@ def get_images_with_pose_ids(path_to_model_file, path_images):
             x_y_id_s = read_next_bytes(fid, num_bytes=24 * num_points2D, format_char_sequence="ddq" * num_points2D)
     return image_ids
 
+def sort_images_based_on_matches(project_path):
+    db_path = os.path.join(project_path, 'colmap', 'database.db')
+    _, matches = get_matches(db_path)
+
+    N = 5
+    matches_ids = None
+    idx_max, _, _ = sort_with_shift(matches, matches_ids, 0, N, end = None)
+
+    _, matches = get_matches(db_path)
+    matches_ids = None
+    _, _, matches_ids = sort_with_shift(matches, matches_ids, 0, N, end = idx_max)
+
+    return matches_ids
+
+def create_resorted_dataset(project_path, matches_ids):
+    path = os.path.join(project_path, 'images')
+    path_new = os.path.join(project_path, 'images_resorted')
+    for k, id in enumerate(matches_ids):
+        os.system(f'cp {os.path.join(path, f"frame_{id+1:05}.png")} {os.path.join(path_new, f"frame_{k+1:05}.png")}')
+    delete_colmap_dirs(project_path)
+    os.system("rm -rf " + os.path.join(project_path, "info.json"))
+    os.system(f"mv {path_new} {os.path.join(project_path, 'images_orig')}")
+
+def get_matches(db_path):
+    conn = sqlite3.connect(db_path)
+    cursor = conn.cursor()
+    
+    # Count matches
+    cursor.execute("SELECT pair_id, rows AS num_matches FROM matches;")
+    total_matches = cursor.fetchall()
+
+    cursor.execute("SELECT image_id, name AS algo FROM images;")
+    image_names = cursor.fetchall()
+    
+    conn.close()
+
+    images = {}
+    for image_id, name in image_names:
+        images[image_id] = name
+        
+    matches = np.zeros((len(images.keys()),len(images.keys())))
+    for pair, row in total_matches:
+        im1 = pair // 2147483647
+        im2 = pair % 2147483647
+        matches[im1-1,im2-1] = row
+        matches[im2-1,im1-1] = row
+
+    return images, matches
+
+def shift_row_col(mat, row_col_be, row_col_af):
+    mat11, mat12, mat21, mat22 = select_quadrants(mat, row_col_be)
+    mat1 = join_quadrants(mat11, mat12, mat21, mat22)
+    mat11, mat12, mat21, mat22 = select_quadrants(mat1, row_col_af,True)
+    col = mat[:, row_col_be].tolist()
+    poped = col.pop(row_col_be)
+    if row_col_af > len(col):
+        col.append(poped)
+    else:
+        col.insert(row_col_af, poped)
+    col_to_ins = np.array([col]).T
+    row_to_ins = np.array([col])
+    
+    top = np.hstack((mat11, col_to_ins[:row_col_af], mat12))  # Horizontally stack the top row
+    bottom = np.hstack((mat21, col_to_ins[row_col_af+1:], mat22))  # Horizontally stack the bottom row
+    result = np.vstack((top, row_to_ins, bottom))  # Vertically stack top and bottom
+    # row_be = result[]
+    return result
+
+def select_quadrants(mat, idx, with_row_column=False):
+    if with_row_column:
+        mat11 = mat[:idx,:idx]
+        mat21 = mat[idx:,:idx]
+        mat12 = mat[:idx,idx:]
+        mat22 = mat[idx:,idx:]
+    else:
+        mat11 = mat[:idx,:idx]
+        mat21 = mat[idx+1:,:idx]
+        mat12 = mat[:idx,idx+1:]
+        mat22 = mat[idx+1:,idx+1:]
+    return mat11, mat12, mat21, mat22
+
+def join_quadrants(q11, q12, q21, q22):
+    top = np.hstack((q11, q12))  # Horizontally stack the top row
+    bottom = np.hstack((q21, q22))  # Horizontally stack the bottom row
+    result = np.vstack((top, bottom))  # Vertically stack top and bottom
+    return result
+
+def sort_matches(matches, matches_ids, k):
+    for i in range(len(matches)-k-1):
+        idx_be = get_k_sorted(matches[i,i+k:],0)+i+k
+        if idx_be > i+k:
+            matches = shift_row_col(matches, idx_be, i+k+1)
+            matches_ids = change_ids(matches_ids, i+k+1, idx_be)
+    return matches, matches_ids
+
+def change_ids(ids, k, idx_be):
+    poped = ids.pop(idx_be)
+    ids.insert(k, poped)
+    return ids
+    
+def get_k_sorted(lst, k):
+    lst_sorted = sorted(lst.tolist(), reverse=True)
+    return lst.tolist().index(lst_sorted[k])
+
+def sort_with_shift(matches_orig, matches_ids_orig, k, N, end = None):
+    trace_max = -np.inf
+    trace_max_ind = None
+    if matches_ids_orig == None:
+        matches_ids_orig = [*range(len(matches_orig))]
+    if end == None:
+        for i in range(len(matches_orig)):
+            if i > 0:
+                matches, matches_ids = initial_shift(matches_orig, matches_ids_orig, i)
+                matches, matches_ids = sort_matches(matches, matches_ids, k)
+            else:
+                matches, matches_ids = sort_matches(matches_orig.copy(), np.array(matches_ids_orig).tolist(), k)
+            trace = measure_diagonality(matches, N)
+            if trace > trace_max:
+                trace_max = trace
+                trace_max_ind = matches_ids_orig[i]
+    else:
+        for i in range(matches_ids_orig.index(end)+1):
+            if i > 0:
+                matches, matches_ids = initial_shift(matches_orig, matches_ids_orig, i)
+                matches, matches_ids = sort_matches(matches, matches_ids, k)
+            else:
+                matches, matches_ids = sort_matches(matches_orig.copy(), np.array(matches_ids_orig).tolist(), k)
+    return trace_max_ind, matches, matches_ids
+
+def initial_shift(mat, mat_ids, steps):
+    matc = mat.copy()
+    matc_ids = mat_ids.copy()
+    for i in range(steps):
+        matc = shift_row_col(matc, 0, len(matc)-1)
+        matc_ids = change_ids(matc_ids, len(matc)-1, 0)
+    return matc, matc_ids
+
+def measure_diagonality(matches, N):
+    trace = np.trace(matches, offset = 0)
+    for i in range(1, N+1):
+        trace += np.trace(matches, offset=i)
+        trace += np.trace(matches, offset=-i)
+    return trace
+
 def init(parent_path, video_folder, is_images=False):
     if not os.path.exists(os.path.join(parent_path, video_folder, "info.json")):
         info = {
@@ -1073,29 +1217,32 @@ def pipeline(parent_path, video_folder, video_path, pilot_output_path, colmap_ou
             # "percentage_poses_found_pilot": percentage_poses_found_pilot,
             # "camera_models_pilot": camera_models_pilot,
         }
-    
-    # Models
-    for model in models:
-        tempo_train, gpu_train_vram, gpu_train_perc, ram_train = nerfstudio_model(colmap_output_path, splatfacto_output_path + f"_{model}", info_path, model, propert=propert)
-    
-        # Model evaluations
-        psnr, ssim, lpips, fps = nerfstudio_model_evaluations(splatfacto_output_path + f"_{model}", video_folder, os.path.join(frames_parent_path, f'output_{model}', 'evaluations'), model, info_path, colmap_output_path, propert=propert)
-
-        output[model] = {}
+    if not propert.is_sorted:
+        matches_ids = sort_images_based_on_matches(colmap_output_path)
+        create_resorted_dataset(colmap_output_path, matches_ids)
+    if not propert.only_colmap:
+        # Models
+        for model in models:
+            tempo_train, gpu_train_vram, gpu_train_perc, ram_train = nerfstudio_model(colmap_output_path, splatfacto_output_path + f"_{model}", info_path, model, propert=propert)
         
-        output[model]["tempo_train"] = tempo_train
-        output[model]["gpu_train_max_vram"] = max(gpu_train_vram)
-        output[model]["gpu_train_max_perc"] = max(gpu_train_perc)
-        output[model]["ram_train_max"] = max(ram_train)
+            # Model evaluations
+            psnr, ssim, lpips, fps = nerfstudio_model_evaluations(splatfacto_output_path + f"_{model}", video_folder, os.path.join(frames_parent_path, f'output_{model}', 'evaluations'), model, info_path, colmap_output_path, propert=propert)
 
-        output[model]["psnr_train_max"] = max(psnr)
-        output[model]["ssim_train_max"] = max(ssim)
-        output[model]["lpips_train_min"] = min(lpips)
-        output[model]["fps_train_min"] = min(fps)
+            output[model] = {}
+            
+            output[model]["tempo_train"] = tempo_train
+            output[model]["gpu_train_max_vram"] = max(gpu_train_vram)
+            output[model]["gpu_train_max_perc"] = max(gpu_train_perc)
+            output[model]["ram_train_max"] = max(ram_train)
 
-        output[model]["psnr_train_max_ckpt"] = elems[psnr.index(max(psnr))]
-        output[model]["ssim_train_max_ckpt"] = elems[ssim.index(max(ssim))]
-        output[model]["lpips_train_min_ckpt"] = elems[lpips.index(min(lpips))]
-        output[model]["fps_train_min_ckpt"] = elems[fps.index(min(fps))]
+            output[model]["psnr_train_max"] = max(psnr)
+            output[model]["ssim_train_max"] = max(ssim)
+            output[model]["lpips_train_min"] = min(lpips)
+            output[model]["fps_train_min"] = min(fps)
+
+            output[model]["psnr_train_max_ckpt"] = elems[psnr.index(max(psnr))]
+            output[model]["ssim_train_max_ckpt"] = elems[ssim.index(max(ssim))]
+            output[model]["lpips_train_min_ckpt"] = elems[lpips.index(min(lpips))]
+            output[model]["fps_train_min_ckpt"] = elems[fps.index(min(fps))]
     
     return output
