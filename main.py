@@ -72,6 +72,7 @@ parser.add_argument("-sf", "--split_fraction", type=float, help="Fraction to div
 parser.add_argument("-mi", "--max_num_iterations", type=int, help="Maximum number of iterations during training", default=30000)
 parser.add_argument("-cvcw", "--colmap_video_changes_window", type=int, help="Approximate size of window to suggest changes in the video, in case of not finding all poses in one camera model", default=15)
 parser.add_argument("-cvcv", "--colmap_video_changes_velocity", type=float, help="Velocity of suggested frames to be changed. Must be less than one, in order to make a slower part of the video", default=0.5)
+parser.add_argument("-cl", "--colmap_limit", type=int, help="Number of tries for COLMAP to find all the poses", default=3)
 # Parse arguments
 args = parser.parse_args()
 
@@ -83,6 +84,7 @@ propert.add_property('split_fraction', args.split_fraction)
 propert.add_property('max_num_iterations', args.max_num_iterations)
 propert.add_property('colmap_video_changes_window', args.colmap_video_changes_window)
 propert.add_property('colmap_video_changes_velocity', args.colmap_video_changes_velocity)
+propert.add_property('colmap_limit', args.colmap_limit)
 
 
 models = [

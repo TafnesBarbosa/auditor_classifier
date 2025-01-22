@@ -1015,7 +1015,7 @@ def write_info(info_path, info):
 
 def pipeline(parent_path, video_folder, video_path, pilot_output_path, colmap_output_path, splatfacto_output_path, models, is_images=False, propert=None):
     # repetition_number = 10
-    colmap_limit = 3
+    colmap_limit = propert.colmap_limit
     elems = [*range(10000, propert.max_num_iterations, 10000)]
     elems.append(propert.max_num_iterations-1)
 
