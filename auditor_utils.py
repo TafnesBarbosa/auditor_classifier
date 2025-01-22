@@ -3,7 +3,6 @@ from scipy.spatial.transform import Rotation as R
 import matplotlib.pyplot as plt
 import os
 import struct
-import matplotlib.cm as cm
 import random
 import matplotlib.patches as patches
 from matplotlib.patches import FancyArrowPatch
@@ -13,9 +12,10 @@ from time import time, sleep
 import subprocess
 import pandas as pd
 import io
-import csv
 import math
 import sqlite3
+import re
+from PIL import Image, ImageDraw, ImageFont
 
 def print_progress_bar(iteration, total, bar_length=50):
     progress = (iteration / total)
@@ -605,7 +605,7 @@ def return_camera_positions(Qs, Ts, centered=False):
     else:
         return camera_positions, normals, w, center
 
-def preprocess_evaluation_main(colmap_output_path, images_path):
+def preprocess_evaluation_main(colmap_output_path, images_path, propert):
     # Get number of images extracted of the video
     try:
         num_images = get_num_images(images_path[0])
@@ -633,11 +633,11 @@ def preprocess_evaluation_main(colmap_output_path, images_path):
     percentage_angle_views = plot_number_views(thetas, phis, centered=False, plot=False)
     percentage_angle_views_center = plot_number_views(thetas_center, phis_center, centered=True, plot=False)
 
-    plot_matches_metrics(colmap_output_path)
+    plot_matches_metrics(colmap_output_path, propert)
 
     return normals_inside, normals_inside_center, percentage_angle_views, percentage_angle_views_center, num_reg_images_max / num_images, camera_model
 
-def plot_matches_metrics(project_path):
+def plot_matches_metrics(project_path, propert):
     folder_report = 'report'
     os.system(f'mkdir {project_path}/{folder_report}')
     folder_report = 'report/colmap'
@@ -753,6 +753,188 @@ def plot_matches_metrics(project_path):
     df.columns = models
     df.to_csv(os.path.join(project_path, folder_report, 'models_with_images.csv'), index=False, sep='\t')
 
+    save_changed_video(lists, models, project_path, window=propert.colmap_video_changes_window, changes_velocity=propert.colmap_video_changes_velocity)
+
+def save_changed_video(lists, models, project_path, window=20, changes_velocity=0.5):
+    idxs = []
+    for row in lists:
+        aux = []
+        for elem in row:
+            aux.append(
+                int(re.search(r'frame_(\d+)\.png', elem).group(1))
+            )
+        idxs.append(aux)
+    sets = {}
+    for model, row in zip(models, idxs):
+        sets[model] = set(row)
+    set_colors = {}
+    colors = ['b', 'r', 'g', 'y', 'c', 'm', 'w']
+    for model, color in zip(models, colors):
+        set_colors[model] = color
+    
+    sets = def_set_to_improve(sets, window)
+
+    # Calculate the union of all sets
+    all_elements = sorted(set.union(*sets.values()))
+    positions = {val: idx for idx, val in enumerate(all_elements)}
+
+    # Initialize the bar layers
+    num_sets = len(sets)
+    bar_layers = np.zeros((num_sets, len(all_elements)), dtype=int)
+
+    # Populate the bar layers for each set
+    for i, (set_name, elements) in enumerate(sets.items()):
+        for elem in elements:
+            bar_layers[i, positions[elem]] = 1
+
+    changes = np.sum(bar_layers,axis=0)
+    changes[changes==1] = 0
+    changes[changes!=0] = 1
+    for i, key in enumerate(sets.keys()):
+        for j, keyi in enumerate(sets.keys()):
+            if key != keyi:
+                if sets[key] <= sets[keyi]:
+                    changes[np.array(list(sets[key]))-1] = 0
+    for k in range(len(changes)):
+        if bar_layers[-1,k] == 1:
+            changes[k] = 1
+    
+    make_changed_video(project_path, changes, changes_velocity)
+
+def def_set_to_improve(sets, N):
+  # aumenta sets
+  biggest = sorted(set.union(*sets.values()))[-1]
+  lowest = sorted(set.union(*sets.values()))[0]
+  sets_up = {}
+  for key in sets.keys():
+    values = list(sets[key])
+    if values[0] != lowest:
+      values_inic = np.arange(values[0]-N,values[0],dtype=int)
+    else:
+      values_inic = []
+    if values[-1] != biggest:
+      values_fim = np.arange(values[-1]+1,values[-1]+N+1,dtype=int)
+    else:
+      values_fim = []
+    sets_up[key] = set(np.concatenate((values_inic,values,values_fim)).tolist())
+
+  return sets_up
+
+def make_changed_video(project_path, changes, changes_velocity):
+    images_path = os.path.join(project_path, 'images_2')
+    os.system(f"mkdir {os.path.join(project_path, 'report', 'colmap', 'images_changed')}")
+    if os.path.exists(os.path.join(project_path, 'report', 'colmap', 'video_changed.mp4')):
+        os.system(f"rm {os.path.join(project_path, 'report', 'colmap', 'video_changed.mp4')}")
+    i = 1
+    for k, file_path in enumerate(sorted(os.listdir(images_path))):
+        image_path = os.path.join(images_path, file_path)
+        if changes[k] == 1:
+            image = open_image(image_path)
+            image = set_image_more_red(image)
+            image = set_red_border_on_image(image)
+            image = set_box_on_image(image)
+            save_image(image, os.path.join(project_path, 'report', 'colmap', 'images_changed', f'frame_{i:05}.png'))
+            for j in range(int(1/changes_velocity-1)):
+                i += 1
+                os.system(f"cp {os.path.join(project_path, 'report', 'colmap', 'images_changed', f'frame_{i-1:05}.png')} {os.path.join(project_path, 'report', 'colmap', 'images_changed', f'frame_{i:05}.png')}")
+        else:
+            os.system(f"cp {image_path} {os.path.join(project_path, 'report', 'colmap', 'images_changed', f'frame_{i:05}.png')}")
+        i += 1
+    os.system(f"ffmpeg -framerate 30 -i {os.path.join(project_path, 'report', 'colmap', 'images_changed', 'frame_%05d.png')} -c:v libx264 -r 30 -pix_fmt yuv420p {os.path.join(project_path, 'report', 'colmap', 'video_changed.mp4')}")
+    os.system(f"rm -rf {os.path.join(project_path, 'report', 'colmap', 'images_changed')}")
+
+def set_box_on_image(image):
+    # Create a drawing object
+    draw = ImageDraw.Draw(image)
+    
+    # Define the text and its position
+    text = "Adicionar mais vistas"
+
+    width, height = image.size
+    
+    initial_font_size = 20
+    box_scale_factor = np.maximum(width, height) // 160 // 3
+
+    position = (np.maximum(width, height) // 100, np.maximum(width, height) // 100)  # Top-left corner of the text box
+    
+    # Define the font (optional, requires a TTF font file)
+    try:
+        font = ImageFont.truetype("arial.ttf", initial_font_size)  # Adjust the font size
+    except IOError:
+        font = ImageFont.load_default()
+    
+    # Scale the box and text size
+    scaled_font_size = initial_font_size * box_scale_factor
+    try:
+        scaled_font = ImageFont.truetype("arial.ttf", scaled_font_size)
+    except IOError:
+        scaled_font = font
+    
+    scaled_text_bbox = draw.textbbox((0, 0), text, font=scaled_font)
+    scaled_text_width = scaled_text_bbox[2] - scaled_text_bbox[0]
+    scaled_text_height = scaled_text_bbox[3] - scaled_text_bbox[1]
+    
+    # Define the scaled red box position and size
+    padding = 10 * box_scale_factor  # Scale the padding as well
+    box_position = position  # Top-left corner of the red box
+    box = [
+        box_position,
+        (box_position[0] + scaled_text_width + 2 * padding, box_position[1] + scaled_text_height + 2 * padding),
+    ]
+
+    box_width = scaled_text_width + 2 * padding
+    box_height = scaled_text_height + 2 * padding
+    
+    # Draw the red rectangle (scaled)
+    draw.rectangle(box, fill="red")
+    
+    # Calculate the new text position to center it in the scaled red box
+    box_center_x = box_position[0] + box_width // 2
+    box_center_y = box_position[1] + box_height // 2
+    text_x = box_center_x - scaled_text_width // 2
+    text_y = box_center_y - scaled_text_height // 2
+    text_position = (text_x, text_y)
+    
+    # Draw the scaled text inside the red box
+    draw.text(text_position, text, fill="white", font=scaled_font)
+
+    return image
+
+def set_image_more_red(image):
+    image = image.convert("RGB")
+
+    red_overlay = Image.new("RGB", image.size, (255, 0, 0))
+
+    transparency = 0.22
+
+    red_image = Image.blend(image, red_overlay, transparency)
+
+    return red_image
+
+def set_red_border_on_image(image):
+    draw = ImageDraw.Draw(image)
+
+    width, height = image.size
+    
+    border_thickness = np.maximum(width, height) // 100
+
+    draw.rectangle(
+        [(0,0), (width, height)],
+        outline="red",
+        width=border_thickness
+    )
+
+    return image
+
+def open_image(image_path):
+    # Open an image
+    image = Image.open(image_path)
+    return image
+
+def save_image(image, path_to_save):
+    # Save or show the image
+    image.save(path_to_save)
+
 def get_images_with_pose_ids(path_to_model_file, path_images):
     """
     see: src/base/reconstruction.cc
@@ -859,7 +1041,7 @@ def pipeline(parent_path, video_folder, video_path, pilot_output_path, colmap_ou
     tempo_colmap, gpu_colmap_vram, gpu_colmap_perc, ram_colmap, number_iterations_colmap, camera_model, is_wrong_flag = preprocess_data(frames_parent_path, colmap_output_path, colmap_limit, info_path)
     
     # Colmap evaluations
-    normals_inside, normals_inside_center, percentage_angle_views, percentage_angle_views_center, percentage_poses_found, _ = preprocess_evaluation_main(colmap_output_path, images_path_8)
+    normals_inside, normals_inside_center, percentage_angle_views, percentage_angle_views_center, percentage_poses_found, _ = preprocess_evaluation_main(colmap_output_path, images_path_8, propert)
     
     # Colmap pilot study evaluations
     # normals_inside_pilot, normals_inside_center_pilot, percentage_angle_views_pilot, percentage_angle_views_center_pilot, percentage_poses_found_pilot, camera_models_pilot = colmap_evaluation_pilot(os.path.join(frames_parent_path, pilot_output_path), images_path_8)
