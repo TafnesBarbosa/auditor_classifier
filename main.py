@@ -36,7 +36,7 @@ def render(path, models):
                 f'--output-path {os.path.join(path, file, "output_" + model, file + "_" + model + "_1.mp4")} ' + 
                 '--downscale-factor 0.25 ' + 
                 '--frame-rate 30 ' + 
-                '--interpolation-steps 60'
+                '--interpolation-steps 15'
             )
 
 def main(path, models, is_images=False, propert=None):
@@ -70,10 +70,11 @@ parser.add_argument("-fn", "--frames_number", type=int, help="Number of downscal
 parser.add_argument("-sf", "--split_fraction", type=float, help="Fraction to divide train/eval dataset", default=0.9)
 parser.add_argument("-mi", "--max_num_iterations", type=int, help="Maximum number of iterations during training", default=30000)
 parser.add_argument("-cvcw", "--colmap_video_changes_window", type=int, help="Approximate size of window to suggest changes in the video, in case of not finding all poses in one camera model", default=15)
-parser.add_argument("-cvcv", "--colmap_video_changes_velocity", type=float, help="Velocity of suggested frames to be changed. Must be less than one, in order to make a slower part of the video", default=0.5)
+parser.add_argument("-cvcv", "--colmap_video_changes_velocity", type=float, help="Velocity of suggested frames to be changed. Must be less than one, in order to make a slower part of the video", default=0.25)
 parser.add_argument("-cl", "--colmap_limit", type=int, help="Number of tries for COLMAP to find all the poses", default=3)
 parser.add_argument("-oc", "--only_colmap", type=bool, help="Number of tries for COLMAP to find all the poses", default=False)
-parser.add_argument("-is", "--is_sorted", type=bool, help="Wether the dataset of image is sorted", default=True)
+parser.add_argument("-ir", "--is_random", type=bool, help="Wether the dataset of image is random and needs to be sorted", default=False)
+parser.add_argument("-m", "--models", nargs='*', type=str, help="Models to run", default=['splatfacto'])
 # Parse arguments
 args = parser.parse_args()
 
@@ -87,16 +88,18 @@ propert.add_property('colmap_video_changes_window', args.colmap_video_changes_wi
 propert.add_property('colmap_video_changes_velocity', args.colmap_video_changes_velocity)
 propert.add_property('colmap_limit', args.colmap_limit)
 propert.add_property('only_colmap', args.only_colmap)
-propert.add_property('is_sorted', args.is_sorted)
+propert.add_property('is_random', args.is_random)
 
-models = [
-    # 'nerfacto',
-#     'nerfacto-big',
-    'splatfacto',
-#     'splatfacto-big',
-#     'splatfacto-w',
-    # 'splatfacto-w-light'
-]
+# models = [
+#     'nerfacto',
+# #     'nerfacto-big',
+#     'splatfacto',
+# #     'splatfacto-big',
+# #     'splatfacto-w',
+#     'splatfacto-w-light'
+# ]
+
+models = args.models
 
 if args.initialize:
     if args.videos_dir:
@@ -114,4 +117,6 @@ else:
             render(args.images_dir, models)
         elif args.videos_dir:
             render(args.videos_dir, models)
-# main("/media/tafnes/0E94B37D94B365BD/Users/tafne/Documents/Dataset_Lamia_4", models)
+# propert.is_random = False
+# propert.only_colmap = True
+# main("/home/tafnes/Downloads/teste_iuri", models, is_images=True, propert=propert)

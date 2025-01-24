@@ -451,7 +451,7 @@ def get_eval_images(project_path, train_split_fraction, eval_path, ns_model, fon
         plt.title('Evaluation PSNR', fontsize=fontsize)
         plt.tick_params(axis='x', labelsize=fontsize)  # Change xticks fontsize
         plt.tick_params(axis='y', labelsize=fontsize)  # Change yticks fontsize
-        plt.savefig(os.path.join(project_path, folder_report, 'PSNR_per_image.png'), bbox_inches='tight')
+        plt.savefig(os.path.join(project_path, folder_report, f'PSNR_per_image_{train_split_fraction}.png'), bbox_inches='tight')
 
         SSIM_limit = 0.9
         fig, ax = plt.subplots(figsize=(12,10))
@@ -468,7 +468,7 @@ def get_eval_images(project_path, train_split_fraction, eval_path, ns_model, fon
         plt.title('Evaluation SSIM', fontsize=fontsize)
         plt.tick_params(axis='x', labelsize=fontsize)  # Change xticks fontsize
         plt.tick_params(axis='y', labelsize=fontsize)  # Change yticks fontsize
-        plt.savefig(os.path.join(project_path, folder_report, 'SSIM_per_image.png'), bbox_inches='tight')
+        plt.savefig(os.path.join(project_path, folder_report, f'SSIM_per_image_{train_split_fraction}.png'), bbox_inches='tight')
 
         LPIPS_limit = 0.15
         fig, ax = plt.subplots(figsize=(12,10))
@@ -485,7 +485,7 @@ def get_eval_images(project_path, train_split_fraction, eval_path, ns_model, fon
         plt.title('Evaluation LPIPS', fontsize=fontsize)
         plt.tick_params(axis='x', labelsize=fontsize)  # Change xticks fontsize
         plt.tick_params(axis='y', labelsize=fontsize)  # Change yticks fontsize
-        plt.savefig(os.path.join(project_path, folder_report, 'LPIPS_per_image.png'), bbox_inches='tight')
+        plt.savefig(os.path.join(project_path, folder_report, f'LPIPS_per_image_{train_split_fraction}.png'), bbox_inches='tight')
     else:
         with open(os.path.join(project_path, folder_report, 'ALERT.txt'), 'w') as filetext:
             filetext.write('Metrics per image not generated, because Nerfstudio code was not changed as shown in the file changes_nerfstudio_metric_per_image.txt')
@@ -1217,8 +1217,9 @@ def pipeline(parent_path, video_folder, video_path, pilot_output_path, colmap_ou
             # "percentage_poses_found_pilot": percentage_poses_found_pilot,
             # "camera_models_pilot": camera_models_pilot,
         }
-    if not propert.is_sorted:
+    if propert.is_random:
         matches_ids = sort_images_based_on_matches(colmap_output_path)
+        output['matches_ids'] = matches_ids.tolist()
         create_resorted_dataset(colmap_output_path, matches_ids)
     if not propert.only_colmap:
         # Models
