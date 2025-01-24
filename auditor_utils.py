@@ -632,12 +632,12 @@ def preprocess_evaluation_main(colmap_output_path, images_path, propert):
     # Plot number of views
     percentage_angle_views = plot_number_views(thetas, phis, centered=False, plot=False)
     percentage_angle_views_center = plot_number_views(thetas_center, phis_center, centered=True, plot=False)
-
-    plot_matches_metrics(colmap_output_path, propert)
+        
+    plot_matches_metrics(colmap_output_path, propert, num_reg_images_max != num_images)
 
     return normals_inside, normals_inside_center, percentage_angle_views, percentage_angle_views_center, num_reg_images_max / num_images, camera_model
 
-def plot_matches_metrics(project_path, propert):
+def plot_matches_metrics(project_path, propert, generate_video=False):
     folder_report = 'report'
     os.system(f'mkdir {project_path}/{folder_report}')
     folder_report = 'report/colmap'
@@ -752,8 +752,8 @@ def plot_matches_metrics(project_path, propert):
     models.append('no model')
     df.columns = models
     df.to_csv(os.path.join(project_path, folder_report, 'models_with_images.csv'), index=False, sep='\t')
-
-    save_changed_video(lists, models, project_path, window=propert.colmap_video_changes_window, changes_velocity=propert.colmap_video_changes_velocity)
+    if generate_video:
+        save_changed_video(lists, models, project_path, window=propert.colmap_video_changes_window, changes_velocity=propert.colmap_video_changes_velocity)
 
 def save_changed_video(lists, models, project_path, window=20, changes_velocity=0.5):
     idxs = []
