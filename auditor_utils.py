@@ -980,14 +980,19 @@ def sort_images_based_on_matches(project_path):
 
     return matches_ids
 
-def create_resorted_dataset(project_path, matches_ids):
+def create_resorted_dataset(project_path, matches_ids, propert):
     path = os.path.join(project_path, 'images')
     path_new = os.path.join(project_path, 'images_resorted')
+    os.system(f"mkdir {path_new}")
     for k, id in enumerate(matches_ids):
         os.system(f'cp {os.path.join(path, f"frame_{id+1:05}.png")} {os.path.join(path_new, f"frame_{k+1:05}.png")}')
-    delete_colmap_dirs(project_path)
-    os.system("rm -rf " + os.path.join(project_path, "info.json"))
-    os.system(f"mv {path_new} {os.path.join(project_path, 'images_orig')}")
+    if propert.delete_all:
+        delete_colmap_dirs(project_path)
+        os.system("rm -rf " + os.path.join(project_path, "info.json"))
+        os.system(f"mv {path_new} {os.path.join(project_path, 'images_orig')}")
+    else:
+        os.system(f"ffmpeg -framerate 30 -i {os.path.join(path_new, 'frame_%05d.png')} -c:v libx264 -r 30 -pix_fmt yuv420p {os.path.join(project_path, 'report', 'colmap', 'video_only_resorted.mp4')}")
+        os.system(f"rm -rf {path_new}")
 
 def get_matches(db_path):
     conn = sqlite3.connect(db_path)
@@ -1086,6 +1091,8 @@ def sort_with_shift(matches_orig, matches_ids_orig, k, N, end = None):
             if trace > trace_max:
                 trace_max = trace
                 trace_max_ind = matches_ids_orig[i]
+            if i % 10 == 0:
+                print_progress_bar(i, len(matches_orig))
     else:
         for i in range(matches_ids_orig.index(end)+1):
             if i > 0:
@@ -1093,6 +1100,8 @@ def sort_with_shift(matches_orig, matches_ids_orig, k, N, end = None):
                 matches, matches_ids = sort_matches(matches, matches_ids, k)
             else:
                 matches, matches_ids = sort_matches(matches_orig.copy(), np.array(matches_ids_orig).tolist(), k)
+            if i % 10 == 0:
+                print_progress_bar(i, matches_ids_orig.index(end)+1)
     return trace_max_ind, matches, matches_ids
 
 def initial_shift(mat, mat_ids, steps):
@@ -1219,7 +1228,7 @@ def pipeline(parent_path, video_folder, video_path, pilot_output_path, colmap_ou
         }
     if propert.is_random:
         matches_ids = sort_images_based_on_matches(colmap_output_path)
-        output['matches_ids'] = matches_ids.tolist()
+        output['matches_ids'] = matches_ids
         create_resorted_dataset(colmap_output_path, matches_ids)
     if not propert.only_colmap:
         # Models

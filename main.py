@@ -75,6 +75,8 @@ parser.add_argument("-cl", "--colmap_limit", type=int, help="Number of tries for
 parser.add_argument("-oc", "--only_colmap", type=bool, help="Number of tries for COLMAP to find all the poses", default=False)
 parser.add_argument("-ir", "--is_random", type=bool, help="Wether the dataset of image is random and needs to be sorted", default=False)
 parser.add_argument("-m", "--models", nargs='*', type=str, help="Models to run", default=['splatfacto'])
+parser.add_argument("-da", "--delete_all", type=bool, help="Delete the unsorted dataset and its stuff to run it again", default=False)
+
 # Parse arguments
 args = parser.parse_args()
 
@@ -89,15 +91,7 @@ propert.add_property('colmap_video_changes_velocity', args.colmap_video_changes_
 propert.add_property('colmap_limit', args.colmap_limit)
 propert.add_property('only_colmap', args.only_colmap)
 propert.add_property('is_random', args.is_random)
-
-# models = [
-#     'nerfacto',
-# #     'nerfacto-big',
-#     'splatfacto',
-# #     'splatfacto-big',
-# #     'splatfacto-w',
-#     'splatfacto-w-light'
-# ]
+propert.add_property('delete_all', args.delete_all)
 
 models = args.models
 
