@@ -527,7 +527,7 @@ def compute_metrics(camera_positions, normals):
 
     return percentage_normals_to_inside, thetas, phis
 
-def plot_number_views(thetas, phis, M=10, N=20, centered=False, plot=True):
+def plot_number_views(project_path, thetas, phis, M=10, N=20, centered=False, plot=True):
     if plot:
         fig = plt.figure()
         ax = fig.add_subplot(111)
@@ -560,6 +560,8 @@ def plot_number_views(thetas, phis, M=10, N=20, centered=False, plot=True):
 
         ax.set_xlabel('theta')
         ax.set_ylabel('phi')
+
+        plt.savefig(os.path.join(project_path, 'report', 'colmap', 'number_of views.png'), bbox_inches='tight')
     return percentage_angle_views
 
 def cartesian_to_spherical(x, y, z):
@@ -630,8 +632,8 @@ def preprocess_evaluation_main(colmap_output_path, images_path, propert):
     normals_inside_center, thetas_center, phis_center = compute_metrics(camera_positions_center, normals_center)
 
     # Plot number of views
-    percentage_angle_views = plot_number_views(thetas, phis, centered=False, plot=False)
-    percentage_angle_views_center = plot_number_views(thetas_center, phis_center, centered=True, plot=False)
+    percentage_angle_views = plot_number_views(colmap_output_path, thetas, phis, centered=False, plot=True)
+    percentage_angle_views_center = plot_number_views(colmap_output_path, thetas_center, phis_center, centered=True, plot=True)
         
     plot_matches_metrics(colmap_output_path, propert, num_reg_images_max != num_images)
 
