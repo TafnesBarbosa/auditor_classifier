@@ -227,7 +227,7 @@ def choose_best_camera_model_and_refine_intrinsics(colmap_output_path, frames_pa
         os.system(f"mv {path_0} {path_1}")
         os.system(f"mv {path} {path_0}")
         os.system(f"mv {path_1} {path}")
-        os.system(f"colmap bundle_adjuster --input_path {path_0} --output_path {path_0} --BundleAdjustment.refine_principal_point 1")
+        os.system(f"colmap bundle_adjuster --input_path {path_0} --output_path {path_0} --BundleAdjustment.refine_principal_point 1 --BundleAdjustment.max_num_iterations 1000")
         os.system(f"ns-process-data images --data {os.path.join(colmap_output_path, 'images_orig')} --output-dir {colmap_output_path} --matching-method exhaustive --skip-colmap --skip-image-processing")
     return camera_model
 
@@ -258,7 +258,7 @@ def run_command(cmd):
             ram.append(ram_usage)
     return gpu_vram, gpu_perc, ram
 
-def preprocess_data(frames_parent_path, colmap_output_path, colmap_limit, info_path):
+def preprocess_data(frames_parent_path, colmap_output_path, colmap_limit, info_path, propert):
     info = read_info(info_path)
     if not info["colmap"]:
         number_iterations = 0
@@ -270,8 +270,10 @@ def preprocess_data(frames_parent_path, colmap_output_path, colmap_limit, info_p
                 "ns-process-data", "images", 
                 "--data", os.path.join(frames_parent_path, "images_orig"), 
                 "--output-dir", colmap_output_path, 
-                "--matching-method", "exhaustive",
-                "--no-refine-intrinsics"
+                "--matching-method", f"{propert.colmap_matching}",
+                "--no-refine-intrinsics",
+                "--camera-type", f"{propert.camera_type}",
+                "--verbose"
             ]
             gpu_vram, gpu_perc, ram = run_command(cmd)
             is_wrong_flag = is_wrong(colmap_output_path, os.path.join(frames_parent_path, "images_orig"))
@@ -335,11 +337,17 @@ def nerfstudio_model(colmap_output_path, splatfacto_output_path, info_path, mode
                 "ns-train", model, 
                 "--data", colmap_output_path, 
                 "--max-num-iterations", str(propert.max_num_iterations), 
-                # "--max-num-iterations", "100000", 
+                "--vis", "viewer+tensorboard", 
                 "--viewer.quit-on-train-completion", "True",
                 "--steps-per-save", "10000", 
                 "--save-only-latest-checkpoint", "False",
                 "--output-dir", splatfacto_output_path,
+                "--pipeline.model.cull_alpha_thresh", f"{0.005 if propert.enhanced_splatfacto else 0.1}",
+                "--pipeline.model.continue_cull_post_densification", f"{False if propert.enhanced_splatfacto else True}",
+                "--optimizers.opacities.optimizer.lr", f"{0.005 if propert.enhanced_splatfacto else 0.05}",
+                "--optimizers.camera-opt.scheduler.max-steps", f"{propert.max_num_iterations if propert.enhanced_splatfacto else 30000}",
+                "--optimizers.means.scheduler.lr-final", f"{1.6e-08 if propert.enhanced_splatfacto else 1.6e-06}",
+                "--optimizers.means.scheduler.max-steps", f"{propert.max_num_iterations if propert.enhanced_splatfacto else 30000}",
                 "nerfstudio-data", "--downscale-factor", str(propert.downscale_factor),
                 "--train-split-fraction", str(propert.split_fraction)
             ]
@@ -528,6 +536,10 @@ def compute_metrics(camera_positions, normals):
     return percentage_normals_to_inside, thetas, phis
 
 def plot_number_views(project_path, thetas, phis, M=10, N=20, centered=False, plot=True):
+    folder_report = 'report'
+    os.system(f'mkdir {project_path}/{folder_report}')
+    folder_report = 'report/colmap'
+    os.system(f'mkdir {project_path}/{folder_report}')
     if plot:
         fig = plt.figure()
         ax = fig.add_subplot(111)
@@ -633,7 +645,9 @@ def preprocess_evaluation_main(colmap_output_path, images_path, propert):
 
     # Plot number of views
     percentage_angle_views = plot_number_views(colmap_output_path, thetas, phis, centered=False, plot=True)
+    # percentage_angle_views = None
     percentage_angle_views_center = plot_number_views(colmap_output_path, thetas_center, phis_center, centered=True, plot=True)
+    # percentage_angle_views_center = None
         
     plot_matches_metrics(colmap_output_path, propert, num_reg_images_max != num_images)
 
@@ -1189,72 +1203,81 @@ def pipeline(parent_path, video_folder, video_path, pilot_output_path, colmap_ou
     # Extract frames and get laplacians
     laplacians = extrai_frames(parent_path, video_folder, video_path, propert.frames_number, info_path)
 
-    # Pilot study with repetitions
-    # pilot_study(repetition_number, frames_parent_path, pilot_output_path, info_path)
+    if propert.only_ffmpeg:
+        output = {
+                "lap_mean": np.mean(laplacians), 
+                "lap_max": max(laplacians), 
+                "lap_min": min(laplacians), 
+                "lap_median": np.median(laplacians),
+            }
+    else:
 
-    # Preprocess dataset
-    tempo_colmap, gpu_colmap_vram, gpu_colmap_perc, ram_colmap, number_iterations_colmap, camera_model, is_wrong_flag = preprocess_data(frames_parent_path, colmap_output_path, colmap_limit, info_path)
-    
-    # Colmap evaluations
-    normals_inside, normals_inside_center, percentage_angle_views, percentage_angle_views_center, percentage_poses_found, _ = preprocess_evaluation_main(colmap_output_path, images_path_8, propert)
-    
-    # Colmap pilot study evaluations
-    # normals_inside_pilot, normals_inside_center_pilot, percentage_angle_views_pilot, percentage_angle_views_center_pilot, percentage_poses_found_pilot, camera_models_pilot = colmap_evaluation_pilot(os.path.join(frames_parent_path, pilot_output_path), images_path_8)
+        # Pilot study with repetitions
+        # pilot_study(repetition_number, frames_parent_path, pilot_output_path, info_path)
 
-    output = {
-            "lap_mean": np.mean(laplacians), 
-            "lap_max": max(laplacians), 
-            "lap_min": min(laplacians), 
-            "lap_median": np.median(laplacians),
-            
-            "tempo_colmap": tempo_colmap, 
-            "gpu_colmap_max_vram": max(gpu_colmap_vram), 
-            "gpu_colmap_max_perc": max(gpu_colmap_perc), 
-            "ram_colmap_max": max(ram_colmap), 
-            "number_iterations_colmap": number_iterations_colmap,
-
-            "percentage_normals_inside": normals_inside, 
-            "percentage_normals_inside_center": normals_inside_center, 
-            "percentage_angle_views": percentage_angle_views, 
-            "percentage_angle_views_center": percentage_angle_views_center, 
-            "percentage_poses_found": percentage_poses_found,
-            "camera_model": camera_model,
-            "wrong_colmap": is_wrong_flag,
-
-            # "percentage_normals_inside_pilot": normals_inside_pilot,
-            # "percentage_normals_inside_center_pilot": normals_inside_center_pilot, 
-            # "percentage_angle_views_pilot": percentage_angle_views_pilot, 
-            # "percentage_angle_views_center_pilot": percentage_angle_views_center_pilot, 
-            # "percentage_poses_found_pilot": percentage_poses_found_pilot,
-            # "camera_models_pilot": camera_models_pilot,
-        }
-    if propert.is_random:
-        matches_ids = sort_images_based_on_matches(colmap_output_path)
-        output['matches_ids'] = matches_ids
-        create_resorted_dataset(colmap_output_path, matches_ids)
-    if not propert.only_colmap:
-        # Models
-        for model in models:
-            tempo_train, gpu_train_vram, gpu_train_perc, ram_train = nerfstudio_model(colmap_output_path, splatfacto_output_path + f"_{model}", info_path, model, propert=propert)
+        # Preprocess dataset
+        tempo_colmap, gpu_colmap_vram, gpu_colmap_perc, ram_colmap, number_iterations_colmap, camera_model, is_wrong_flag = preprocess_data(frames_parent_path, colmap_output_path, colmap_limit, info_path, propert)
         
-            # Model evaluations
-            psnr, ssim, lpips, fps = nerfstudio_model_evaluations(splatfacto_output_path + f"_{model}", video_folder, os.path.join(frames_parent_path, f'output_{model}', 'evaluations'), model, info_path, colmap_output_path, propert=propert)
+        # Colmap evaluations
+        normals_inside, normals_inside_center, percentage_angle_views, percentage_angle_views_center, percentage_poses_found, _ = preprocess_evaluation_main(colmap_output_path, images_path_8, propert)
+        
+        # Colmap pilot study evaluations
+        # normals_inside_pilot, normals_inside_center_pilot, percentage_angle_views_pilot, percentage_angle_views_center_pilot, percentage_poses_found_pilot, camera_models_pilot = colmap_evaluation_pilot(os.path.join(frames_parent_path, pilot_output_path), images_path_8)
 
-            output[model] = {}
+        output = {
+                "lap_mean": np.mean(laplacians), 
+                "lap_max": max(laplacians), 
+                "lap_min": min(laplacians), 
+                "lap_median": np.median(laplacians),
+                
+                "tempo_colmap": tempo_colmap, 
+                "gpu_colmap_max_vram": max(gpu_colmap_vram), 
+                "gpu_colmap_max_perc": max(gpu_colmap_perc), 
+                "ram_colmap_max": max(ram_colmap), 
+                "number_iterations_colmap": number_iterations_colmap,
+
+                "percentage_normals_inside": normals_inside, 
+                "percentage_normals_inside_center": normals_inside_center, 
+                "percentage_angle_views": percentage_angle_views, 
+                "percentage_angle_views_center": percentage_angle_views_center, 
+                "percentage_poses_found": percentage_poses_found,
+                "camera_model": camera_model,
+                "wrong_colmap": is_wrong_flag,
+
+                # "percentage_normals_inside_pilot": normals_inside_pilot,
+                # "percentage_normals_inside_center_pilot": normals_inside_center_pilot, 
+                # "percentage_angle_views_pilot": percentage_angle_views_pilot, 
+                # "percentage_angle_views_center_pilot": percentage_angle_views_center_pilot, 
+                # "percentage_poses_found_pilot": percentage_poses_found_pilot,
+                # "camera_models_pilot": camera_models_pilot,
+            }
+        if propert.is_random:
+            matches_ids = sort_images_based_on_matches(colmap_output_path)
+            output['matches_ids'] = matches_ids
+            create_resorted_dataset(colmap_output_path, matches_ids)
+        if not propert.only_colmap:
+            # Models
+            for model in models:
+                tempo_train, gpu_train_vram, gpu_train_perc, ram_train = nerfstudio_model(colmap_output_path, splatfacto_output_path + f"_{model}", info_path, model, propert=propert)
             
-            output[model]["tempo_train"] = tempo_train
-            output[model]["gpu_train_max_vram"] = max(gpu_train_vram)
-            output[model]["gpu_train_max_perc"] = max(gpu_train_perc)
-            output[model]["ram_train_max"] = max(ram_train)
+                # Model evaluations
+                psnr, ssim, lpips, fps = nerfstudio_model_evaluations(splatfacto_output_path + f"_{model}", video_folder, os.path.join(frames_parent_path, f'output_{model}', 'evaluations'), model, info_path, colmap_output_path, propert=propert)
 
-            output[model]["psnr_train_max"] = max(psnr)
-            output[model]["ssim_train_max"] = max(ssim)
-            output[model]["lpips_train_min"] = min(lpips)
-            output[model]["fps_train_min"] = min(fps)
+                output[model] = {}
+                
+                output[model]["tempo_train"] = tempo_train
+                output[model]["gpu_train_max_vram"] = max(gpu_train_vram)
+                output[model]["gpu_train_max_perc"] = max(gpu_train_perc)
+                output[model]["ram_train_max"] = max(ram_train)
 
-            output[model]["psnr_train_max_ckpt"] = elems[psnr.index(max(psnr))]
-            output[model]["ssim_train_max_ckpt"] = elems[ssim.index(max(ssim))]
-            output[model]["lpips_train_min_ckpt"] = elems[lpips.index(min(lpips))]
-            output[model]["fps_train_min_ckpt"] = elems[fps.index(min(fps))]
+                output[model]["psnr_train_max"] = max(psnr)
+                output[model]["ssim_train_max"] = max(ssim)
+                output[model]["lpips_train_min"] = min(lpips)
+                output[model]["fps_train_min"] = min(fps)
+
+                output[model]["psnr_train_max_ckpt"] = elems[psnr.index(max(psnr))]
+                output[model]["ssim_train_max_ckpt"] = elems[ssim.index(max(ssim))]
+                output[model]["lpips_train_min_ckpt"] = elems[lpips.index(min(lpips))]
+                output[model]["fps_train_min_ckpt"] = elems[fps.index(min(fps))]
     
     return output
