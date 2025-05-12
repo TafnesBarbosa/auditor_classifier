@@ -57,10 +57,10 @@ def preprocess_images(frames_path):
 def extrai_frames_ffmpeg(parent_path, video_folder, video_path):
     if not os.path.exists(os.path.join(parent_path, video_folder, 'images_orig')):
         os.system('mkdir ' + os.path.join(parent_path, video_folder, 'images_orig'))
-        os.system('ffmpeg -i ' + os.path.join(parent_path, video_folder, video_path) + ' ' + os.path.join(parent_path, video_folder, 'images_orig') + r'/frame%5d.png')
+        os.system('ffmpeg -v quiet -i ' + os.path.join(parent_path, video_folder, video_path) + ' ' + os.path.join(parent_path, video_folder, 'images_orig') + r'/frame%5d.png')
     else:
         if len(os.listdir(os.path.join(parent_path, video_folder, 'images_orig'))) == 0:
-            os.system('ffmpeg -i ' + os.path.join(parent_path, video_folder, video_path) + ' ' + os.path.join(parent_path, video_folder, 'images_orig') + r'/frame%5d.png')
+            os.system('ffmpeg -v quiet -i ' + os.path.join(parent_path, video_folder, video_path) + ' ' + os.path.join(parent_path, video_folder, 'images_orig') + r'/frame%5d.png')
 
 def extrai_frames(parent_path, video_folder, video_path, frames_number, info_path):
     info = read_info(info_path)
@@ -344,10 +344,16 @@ def nerfstudio_model(colmap_output_path, splatfacto_output_path, info_path, mode
                 "--output-dir", splatfacto_output_path,
                 "--pipeline.model.cull_alpha_thresh", f"{0.005 if propert.enhanced_splatfacto else 0.1}",
                 "--pipeline.model.continue_cull_post_densification", f"{False if propert.enhanced_splatfacto else True}",
-                "--optimizers.opacities.optimizer.lr", f"{0.005 if propert.enhanced_splatfacto else 0.05}",
-                "--optimizers.camera-opt.scheduler.max-steps", f"{propert.max_num_iterations if propert.enhanced_splatfacto else 30000}",
-                "--optimizers.means.scheduler.lr-final", f"{1.6e-08 if propert.enhanced_splatfacto else 1.6e-06}",
+                "--pipeline.model.densify-grad-thresh", f"{0.0002 if propert.enhanced_splatfacto else 0.0008}",
+                "--pipeline.model.densify-size-thresh", f"{0.0001 if propert.enhanced_splatfacto else 0.01}",
+                "--pipeline.model.cull-scale-thresh", f"{9 if propert.enhanced_splatfacto else 0.5}",
+                "--pipeline.model.stop-split-at", f"{int(propert.max_num_iterations // 2) if propert.enhanced_splatfacto else 15000}",
+                "--pipeline.model.stop-screen-size-at", f"{int(propert.max_num_iterations // 7.5) if propert.enhanced_splatfacto else 4000}",
+                "--pipeline.model.cull-screen-size", f"{0.99 if propert.enhanced_splatfacto else 0.15}",
+                "--optimizers.means.optimizer.lr", f"{0.00016 if propert.enhanced_splatfacto else 0.00016}",
+                "--optimizers.means.scheduler.lr-final", f"{4e-07 if propert.enhanced_splatfacto else 1.6e-06}",
                 "--optimizers.means.scheduler.max-steps", f"{propert.max_num_iterations if propert.enhanced_splatfacto else 30000}",
+                "--optimizers.scales.optimizer.lr", f"{0.005 if propert.enhanced_splatfacto else 0.005}",
                 "nerfstudio-data", "--downscale-factor", str(propert.downscale_factor),
                 "--train-split-fraction", str(propert.split_fraction)
             ]
@@ -649,7 +655,7 @@ def preprocess_evaluation_main(colmap_output_path, images_path, propert):
     percentage_angle_views_center = plot_number_views(colmap_output_path, thetas_center, phis_center, centered=True, plot=True)
     # percentage_angle_views_center = None
         
-    plot_matches_metrics(colmap_output_path, propert, num_reg_images_max != num_images)
+    # plot_matches_metrics(colmap_output_path, propert, num_reg_images_max != num_images)
 
     return normals_inside, normals_inside_center, percentage_angle_views, percentage_angle_views_center, num_reg_images_max / num_images, camera_model
 
