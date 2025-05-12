@@ -16,6 +16,8 @@ import math
 import sqlite3
 import re
 from PIL import Image, ImageDraw, ImageFont
+import psutil
+import pynvml
 
 def print_progress_bar(iteration, total, bar_length=50):
     progress = (iteration / total)
@@ -182,39 +184,61 @@ def delete_colmap_dirs(colmap_output_path):
     delete_colmap_partial_data(colmap_output_path)
 
 # Function to get GPU usage
-def get_gpu_usage():
+def get_gpu_usage(pid):
     try:
-        result = subprocess.run(
-            ["nvidia-smi", "--query-gpu=memory.used,utilization.gpu", "--format=csv,noheader,nounits"],
-            capture_output=True,
-            text=True,
-            check=True
-        )
-        res = result.stdout.strip()
-        gpu_usage = res[:res.find(',')]
-        gpu_percentage = res[res.find(',')+1:]
-        return int(gpu_usage), int(gpu_percentage)
-    except subprocess.CalledProcessError as e:
-        print(f"Error querying GPU usage: {e}")
+        process_psutil = psutil.Process(pid)
+        pids = [pid] + [child.pid for child in process_psutil.children(recursive=True)]
+        try:
+            result = subprocess.run(
+                ["nvidia-smi", "--query-gpu=utilization.gpu", "--format=csv,noheader,nounits"],
+                capture_output=True,
+                text=True,
+                check=True
+            )
+            res = result.stdout.strip()
+            gpu_percentage = int(res)
+        except subprocess.CalledProcessError as e:
+            print(f"Error querying GPU percentage: {e}")
+            gpu_percentage = None
+
+        device_count = pynvml.nvmlDeviceGetCount()
+        gpu_usage = None
+
+        for i in range(device_count):
+            handle = pynvml.nvmlDeviceGetHandleByIndex(i)
+            try:
+                # This catches compute and graphics processes
+                procs = pynvml.nvmlDeviceGetComputeRunningProcesses(handle)
+                procs += pynvml.nvmlDeviceGetGraphicsRunningProcesses(handle)
+            except pynvml.NVMLError as e:
+                print(f"Error querying GPU usage: {e}")
+                gpu_usage = None
+                continue
+            
+            gpu_usage = 0
+            for proc in procs:
+                if proc.pid in pids:
+                    mem_used_mib = proc.usedGpuMemory // 1024**2
+                    gpu_usage += mem_used_mib
+
+        return gpu_usage, gpu_percentage
+    except:
         return None, None
     
-# Function to get GPU usage
-def get_ram_usage():
+# Function to get RAM usage
+def get_ram_usage(pid):
     try:
-        result = subprocess.run(
-            ["free"],
-            capture_output=True,
-            text=True,
-            check=True
-        )
-        ram_usage = result.stdout.strip()
-        ram_data = io.StringIO(ram_usage)
-        ram_df = pd.read_csv(ram_data, sep='\s+')
-        ram_df = ram_df.loc['Mem.:']
-        ram_usage = (ram_df['total'] - ram_df['disponível']) / 1e6 # In Gb
-        return ram_usage
-    except subprocess.CalledProcessError as e:
-        print(f"Error querying RAM usage: {e}")
+        process_psutil = psutil.Process(pid)
+        pids = [pid] + [child.pid for child in process_psutil.children(recursive=True)]
+        try:
+            result = sum(psutil.Process(pid).memory_info().rss for pid in pids)
+            ram_usage = result / 1024 / 1024 / 1024 # In Gb
+
+            return ram_usage
+        except psutil.NoSuchProcess:
+            print("Error querying RAM usage")
+            return None
+    except:
         return None
 
 def choose_best_camera_model_and_refine_intrinsics(colmap_output_path, frames_parent_path):
@@ -236,26 +260,38 @@ def run_command(cmd):
     gpu_perc = []
     ram = []
     process = subprocess.Popen(cmd)
+
+    # Get PIDs of the cmd
+    pid = process.pid
+
     # Monitor GPU usage while the command is running
     try:
         while process.poll() is None:  # Check if process is still running
-            gpu_usage, gpu_percentage = get_gpu_usage()
-            ram_usage = get_ram_usage()
+            gpu_usage, gpu_percentage = get_gpu_usage(pid)
+            ram_usage = get_ram_usage(pid)
             if gpu_usage:
                 gpu_vram.append(gpu_usage)
+            if gpu_percentage:
                 gpu_perc.append(gpu_percentage)
             if ram_usage:
                 ram.append(ram_usage)
             sleep(1)  # Adjust the interval as needed
     finally:
         process.wait()  # Ensure the process completes
-        gpu_usage, gpu_percentage = get_gpu_usage()
-        ram_usage = get_ram_usage()
+        gpu_usage, gpu_percentage = get_gpu_usage(pid)
+        ram_usage = get_ram_usage(pid)
         if gpu_usage:
             gpu_vram.append(gpu_usage)
+        if gpu_percentage:
             gpu_perc.append(gpu_percentage)
         if ram_usage:
             ram.append(ram_usage)
+    if len(gpu_vram) == 0:
+        gpu_vram = [0]
+    if len(gpu_perc) == 0:
+        gpu_perc = [0]
+    if len(ram) == 0:
+        ram = [0]
     return gpu_vram, gpu_perc, ram
 
 def preprocess_data(frames_parent_path, colmap_output_path, colmap_limit, info_path, propert):
@@ -1189,6 +1225,8 @@ def write_info(info_path, info):
         file.close()
 
 def pipeline(parent_path, video_folder, video_path, pilot_output_path, colmap_output_path, splatfacto_output_path, models, is_images=False, propert=None):
+    pynvml.nvmlInit()
+
     # repetition_number = 10
     colmap_limit = propert.colmap_limit
     elems = [*range(10000, propert.max_num_iterations, 10000)]
