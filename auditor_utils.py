@@ -218,7 +218,7 @@ def get_gpu_usage(pid):
             gpu_usage = 0
             for proc in procs:
                 if proc.pid in pids:
-                    mem_used_mib = proc.usedGpuMemory // 1024**2
+                    mem_used_mib = proc.usedGpuMemory / 1024**2
                     gpu_usage += mem_used_mib
 
         return gpu_usage, gpu_percentage
